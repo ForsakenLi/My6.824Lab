@@ -7,7 +7,7 @@ package main
 //
 
 import "fmt"
-import "../mr"
+import "ds/mr"
 import "plugin"
 import "os"
 import "log"
@@ -18,8 +18,10 @@ import "sort"
 type ByKey []mr.KeyValue
 
 // for sorting by key.
+// 实现Sort接口
 func (a ByKey) Len() int           { return len(a) }
 func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+// 根据Key的字典序排序，使相同的词在一起
 func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 func main() {
@@ -46,8 +48,8 @@ func main() {
 			log.Fatalf("cannot read %v", filename)
 		}
 		file.Close()
-		kva := mapf(filename, string(content))
-		intermediate = append(intermediate, kva...)
+		kva := mapf(filename, string(content))	//kva中所有词频均为1
+		intermediate = append(intermediate, kva...)	//未reduce的词频
 	}
 
 	//
@@ -56,6 +58,7 @@ func main() {
 	// rather than being partitioned into NxM buckets.
 	//
 
+	// 把相同的单词聚集在一起
 	sort.Sort(ByKey(intermediate))
 
 	oname := "mr-out-0"
@@ -69,18 +72,18 @@ func main() {
 	for i < len(intermediate) {
 		j := i + 1
 		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
-			j++
+			j++	// 找到还是该词为止的intermediate下标
 		}
 		values := []string{}
 		for k := i; k < j; k++ {
-			values = append(values, intermediate[k].Value)
+			values = append(values, intermediate[k].Value)	//把所有"1"放到一个values切片里，交给reducef
 		}
 		output := reducef(intermediate[i].Key, values)
 
 		// this is the correct format for each line of Reduce output.
 		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
 
-		i = j
+		i = j	// 将i改为下一个单词下标起点
 	}
 
 	ofile.Close()

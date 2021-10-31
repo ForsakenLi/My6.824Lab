@@ -5,8 +5,7 @@ import "log"
 import "net/rpc"
 import "hash/fnv"
 
-
-//
+// KeyValue
 // Map functions return a slice of KeyValue.
 //
 type KeyValue struct {
@@ -24,8 +23,7 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-
-//
+// Worker
 // main/mrworker.go calls this function.
 //
 func Worker(mapf func(string, string) []KeyValue,
@@ -38,7 +36,7 @@ func Worker(mapf func(string, string) []KeyValue,
 
 }
 
-//
+// CallExample
 // example function to show how to make an RPC call to the master.
 //
 // the RPC argument and reply types are defined in rpc.go.
@@ -67,15 +65,15 @@ func CallExample() {
 // returns false if something goes wrong.
 //
 func call(rpcname string, args interface{}, reply interface{}) bool {
-	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
+	// client, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := masterSock()
-	c, err := rpc.DialHTTP("unix", sockname)
+	client, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
 		log.Fatal("dialing:", err)
 	}
-	defer c.Close()
+	defer client.Close()
 
-	err = c.Call(rpcname, args, reply)
+	err = client.Call(rpcname, args, reply)
 	if err == nil {
 		return true
 	}

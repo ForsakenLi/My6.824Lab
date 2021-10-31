@@ -14,7 +14,7 @@ type Master struct {
 
 // Your code here -- RPC handlers for the worker to call.
 
-//
+// Example
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
@@ -41,7 +41,7 @@ func (m *Master) server() {
 	go http.Serve(l, nil)
 }
 
-//
+// Done
 // main/mrmaster.go calls Done() periodically to find out
 // if the entire job has finished.
 //
@@ -54,7 +54,7 @@ func (m *Master) Done() bool {
 	return ret
 }
 
-//
+// MakeMaster
 // create a Master.
 // main/mrmaster.go calls this function.
 // nReduce is the number of reduce tasks to use.
