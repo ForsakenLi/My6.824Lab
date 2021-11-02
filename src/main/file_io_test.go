@@ -1,85 +1,34 @@
-package mr
+package main
 
 import (
 	"fmt"
-	"io/fs"
 	"io/ioutil"
-	"log"
-	"net"
-	"net/http"
-	"net/rpc"
 	"os"
 	"strconv"
+	"testing"
 )
 
-
-type Master struct {
-	// Your definitions here.
-	taskFiles [][]string
+func TestOsStat(t *testing.T) {
+    fi,err:=os.Stat("pg-being_ernest.txt")	// no need to read into RAM
+    if err ==nil {
+        t.Log("file size is ",fi.Size(), err)
+    }
 }
 
-// Your code here -- RPC handlers for the worker to call.
-
-// Example
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func (m *Master) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
-	return nil
+func TestIoLen(t *testing.T) {
+	content,err:=ioutil.ReadFile("pg-being_ernest.txt")
+    if err == nil {
+        t.Log("file size is ",len(content))
+    }
 }
 
-
-//
-// start a thread that listens for RPCs from worker.go
-// https://studygolang.com/articles/14336
-//
-func (m *Master) server() {
-	rpc.Register(m)
-	rpc.HandleHTTP()
-	//l, e := net.Listen("tcp", ":1234")
-	sockname := masterSock()
-	os.Remove(sockname)
-	l, e := net.Listen("unix", sockname)
-	if e != nil {
-		log.Fatal("listen error:", e)
-	}
-	go http.Serve(l, nil)
+func TestSplit(t *testing.T) {
+    _, err := splitFiles([]string{"pg-being_ernest.txt"}, 10)
+    if err != nil {
+        t.Error(err)
+    }
 }
 
-// Done
-// main/mrmaster.go calls Done() periodically to find out
-// if the entire job has finished.
-//
-func (m *Master) Done() bool {
-	ret := false
-
-	// Your code here.
-
-	return ret
-}
-
-// MakeMaster 构造函数
-// create a Master.
-// main/mrmaster.go calls this function.
-// nReduce is the number of reduce tasks to use.
-//
-func MakeMaster(files []string, nReduce int) *Master {
-	m := Master{}
-
-	// Your code here.
-	stdFiles := splitFiles(files, )
-	
-	
-	m.server()
-	return &m
-}
-
-// files可能存在数据倾斜问题, 需要拆分文件为更小粒度的文件
-// 但拆分文件的逻辑比较复杂, 文件切分的位置需要不在一个单词中间
-// 应该采用冗余执行的策略，如果某一个worker宕机，备用任务也可以完成
-// 可参考MapReduce论文3.5节
 // 拆分给定文件为若干子文件，子文件大小应尽可能一致
 func splitFiles(inputFiles []string, splitNum int) ([]string, error) {
 	var totalSize int
