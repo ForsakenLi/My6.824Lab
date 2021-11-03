@@ -10,12 +10,19 @@ import (
 	"net/rpc"
 	"os"
 	"strconv"
+	"sync"
+	"testing/quick"
 )
-
 
 type Master struct {
 	// Your definitions here.
-	taskFiles [][]string
+	mapFiles    []string
+	//mapIndex    int	// check the file, not use the var to decide
+	reduceFiles []string
+	// reduceIndex int
+	// isDone      bool	// check the file, not use the var to decide
+	wg			sync.WaitGroup
+	mutex		sync.RWMutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -29,7 +36,6 @@ func (m *Master) Example(args *ExampleArgs, reply *ExampleReply) error {
 	reply.Y = args.X + 1
 	return nil
 }
-
 
 //
 // start a thread that listens for RPCs from worker.go
@@ -60,27 +66,44 @@ func (m *Master) Done() bool {
 	return ret
 }
 
-// MakeMaster 构造函数
+// worker call this method, must mutli-thread safe
+func GetJob() (files []string, isMapJob bool, outputFile string) {
+	// need open a gooroutine to follow the job sent to worker is finish or not
+
+	// map job worker need to save the word to special reduce file(by ihash func)
+}
+
+// worker have to report the result of map job, cause map job just put those key,1
+// into property reduce source file, so map job have to been track
+func MapJobFinished(){
+	
+}
+
+// MakeMaster
 // create a Master.
 // main/mrmaster.go calls this function.
 // nReduce is the number of reduce tasks to use.
+// note: needless to concern whether worker is done the job or not,
+// just to look out whether the map-res-file and reduce-res-file is ok
 //
 func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{}
 
 	// Your code here.
-	stdFiles := splitFiles(files, )
-	
-	
+	stdFiles, err := splitFiles(files, 10*nReduce)
+	if err != nil {
+		panic(err)
+	}
+	m.mapFiles = stdFiles
+	//m.mapIndex = 0
+	m.reduceFiles = make([]string, 0)
+	m.isDone = false
+	m.wg = sync.WaitGroup{}
+	m.mutex = sync.RWMutex{}
 	m.server()
 	return &m
 }
 
-// files可能存在数据倾斜问题, 需要拆分文件为更小粒度的文件
-// 但拆分文件的逻辑比较复杂, 文件切分的位置需要不在一个单词中间
-// 应该采用冗余执行的策略，如果某一个worker宕机，备用任务也可以完成
-// 可参考MapReduce论文3.5节
-// 拆分给定文件为若干子文件，子文件大小应尽可能一致
 func splitFiles(inputFiles []string, splitNum int) ([]string, error) {
 	var totalSize int
 	for _, f := range inputFiles {
@@ -91,7 +114,7 @@ func splitFiles(inputFiles []string, splitNum int) ([]string, error) {
 		totalSize += int(stat.Size())
 	}
 	chunkSize := totalSize / splitNum
-	mem := make([]byte, 0)	// 暂存文件内容块
+	mem := make([]byte, 0) // 暂存文件内容块
 	contentStart := 0
 	mapFileCount := 0
 	resFileList := make([]string, 0)
@@ -106,7 +129,7 @@ func splitFiles(inputFiles []string, splitNum int) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("[splitFiles.ReadAll]%v", err)
 		}
-		if len(content) + len(mem) >= chunkSize {
+		if len(content)+len(mem) >= chunkSize {
 			// save mem to file system
 			endIndex := chunkSize - len(mem)
 			for endIndex < len(content) && content[endIndex] != byte(' ') && content[endIndex] != byte('\n') {
@@ -125,8 +148,8 @@ func splitFiles(inputFiles []string, splitNum int) ([]string, error) {
 			mem = append(mem, content...)
 			contentStart = 0
 			i++
-		}   
-        file.Close()
+		}
+		file.Close()
 	}
 	// 输出残余mem块
 	mapFileName := "map-" + strconv.Itoa(mapFileCount)
