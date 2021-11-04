@@ -12,17 +12,22 @@ import (
 	"strconv"
 	"sync"
 	"testing/quick"
+	"time"
 )
 
 type Master struct {
 	// Your definitions here.
 	mapFiles    []string
-	//mapIndex    int	// check the file, not use the var to decide
 	reduceFiles []string
-	// reduceIndex int
-	// isDone      bool	// check the file, not use the var to decide
-	wg			sync.WaitGroup
-	mutex		sync.RWMutex
+	inMapJob    bool
+	mapJobState map[int]int
+	// mapJobState: if value is 100, means job is finished, if value is 0
+	// job is not been assigned or failed(need to be assigned again), 
+	// if value is 0~10, which is a timer, reduce
+	// itself 1 per second.
+	wg           sync.WaitGroup
+	mutex        sync.RWMutex
+	timerCounter int
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -52,6 +57,27 @@ func (m *Master) server() {
 		log.Fatal("listen error:", e)
 	}
 	go http.Serve(l, nil)
+	go timer(m)
+}
+
+func timer(m *Master) {
+	m.timerCounter++
+	if m.timerCounter > 1 {
+		return
+	}
+	for {
+		if m.inMapJob {
+			for k, v := range m.mapJobState {
+				if v > 0 && v <= 10 {
+					m.mutex.Lock()
+					m.mapJobState[k] = v - 1
+					m.mutex.Unlock()
+				}
+			}
+		}
+		time.Sleep(time.Second)
+	}
+
 }
 
 // Done
@@ -73,12 +99,6 @@ func GetJob() (files []string, isMapJob bool, outputFile string) {
 	// map job worker need to save the word to special reduce file(by ihash func)
 }
 
-// worker have to report the result of map job, cause map job just put those key,1
-// into property reduce source file, so map job have to been track
-func MapJobFinished(){
-	
-}
-
 // MakeMaster
 // create a Master.
 // main/mrmaster.go calls this function.
@@ -97,7 +117,7 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m.mapFiles = stdFiles
 	//m.mapIndex = 0
 	m.reduceFiles = make([]string, 0)
-	m.isDone = false
+	m.inMapJob = true
 	m.wg = sync.WaitGroup{}
 	m.mutex = sync.RWMutex{}
 	m.server()

@@ -34,6 +34,14 @@ func Worker(mapf func(string, string) []KeyValue,
 	// uncomment to send the Example RPC to the master.
 	// CallExample()
 
+	// ReduceWork: use temp file to save intermediate output, then rename the file to
+	// show the job is finished
+
+	// MapWork: save the map result to a temp-mapid-ihash file, reduce job will combine the
+	// same ihash file to accelerate the reduce work
+
+func getJobFromMaster() {
+	
 }
 
 // CallExample
