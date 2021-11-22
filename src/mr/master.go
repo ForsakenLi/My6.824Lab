@@ -18,16 +18,22 @@ import (
 type Master struct {
 	// Your definitions here.
 	mapFiles    []string
-	reduceFiles []string
-	inMapJob    bool
-	mapJobState map[int]int
-	// mapJobState: if value is 100, means job is finished, if value is 0
-	// job is not been assigned or failed(need to be assigned again), 
+	mapResFiles [][]string
+	//reduceFiles [][]string
+	resultFiles		[]string
+	inMapJob       bool
+	mapJobState    map[int]int
+	reduceJobState map[int]int
+	// JobState: if value is 100, means job is finished, if value is 0
+	// job is not been assigned or failed(need to be assigned again),
 	// if value is 0~10, which is a timer, reduce
 	// itself 1 per second.
-	wg           sync.WaitGroup
-	mutex        sync.RWMutex
-	timerCounter int
+	// In a word, Master only assigned those job whose state value is 0.
+	wg              sync.WaitGroup
+	mutex           sync.RWMutex
+	mutex2			sync.RWMutex	// for reduce job
+	timerCounter    int
+	reduceWorkerNum int
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -67,17 +73,35 @@ func timer(m *Master) {
 	}
 	for {
 		if m.inMapJob {
+			finishedNumber := 0
 			for k, v := range m.mapJobState {
 				if v > 0 && v <= 10 {
-					m.mutex.Lock()
-					m.mapJobState[k] = v - 1
-					m.mutex.Unlock()
+					isAllFinished := true
+					for _, f := range m.mapResFiles[k] {
+						if exist, err := pathExists(f); exist == false || err != nil {
+							isAllFinished = false
+							break
+						}
+					}
+					if !isAllFinished {
+						m.mutex.Lock()
+						m.mapJobState[k] = v - 1
+						m.mutex.Unlock()
+					} else {
+						m.mutex.Lock()
+						m.mapJobState[k] = 100
+						m.mutex.Unlock()
+					}
+				} else if v == 100 {
+					finishedNumber++
 				}
+			}
+			if finishedNumber == m.reduceWorkerNum {
+				m.inMapJob = false
 			}
 		}
 		time.Sleep(time.Second)
 	}
-
 }
 
 // Done
@@ -93,10 +117,35 @@ func (m *Master) Done() bool {
 }
 
 // worker call this method, must mutli-thread safe
-func GetJob() (files []string, isMapJob bool, outputFile string) {
-	// need open a gooroutine to follow the job sent to worker is finish or not
-
-	// map job worker need to save the word to special reduce file(by ihash func)
+// 无论是MapJob 还是 ReduceJob 都通过该方法分配任务
+// Map: 进1出n Reduce: 进n出1
+// hang == true时表示当前暂时无任务分配，需要worker等待一段时间再尝试
+func (m *Master) GetJob() (inputFiles []string, isMapJob bool, outputFile []string, hang bool) {
+	if m.inMapJob {
+		for k, v := range m.mapJobState {
+			if v == 0 {
+				inputFiles = []string{m.mapFiles[k]}
+				isMapJob = true
+				outputFile = m.mapResFiles[k]
+				hang = false
+				m.mutex.Lock()
+				m.mapJobState[k] = 10 //开始计时
+				m.mutex.Unlock()
+				return
+			}
+		}
+		hang = true
+		return
+	} else {
+		// 显然 reduce也需要一个State计时器来跟踪任务状态
+		for k, v := range m.reduceJobState {
+			if v == 0 {
+				inputFiles = m.mapResFiles[k]
+				isMapJob = false
+				// outputFile = 
+			}
+		}
+	}
 }
 
 // MakeMaster
@@ -108,20 +157,38 @@ func GetJob() (files []string, isMapJob bool, outputFile string) {
 //
 func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{}
-
+	m.reduceWorkerNum = nReduce
 	// Your code here.
-	stdFiles, err := splitFiles(files, 10*nReduce)
+	stdFiles, err := splitFiles(files, 10)
 	if err != nil {
 		panic(err)
 	}
 	m.mapFiles = stdFiles
+	m.mapResFiles = genMapResList(10, nReduce)
 	//m.mapIndex = 0
-	m.reduceFiles = make([]string, 0)
+	//m.reduceFiles = make([]string, 0)
+	m.mapJobState = make(map[int]int)
+	for i := 0; i < 10; i++ {
+		m.mapJobState[i] = 0
+	}
 	m.inMapJob = true
 	m.wg = sync.WaitGroup{}
 	m.mutex = sync.RWMutex{}
+	m.mutex2 = sync.RWMutex{}
 	m.server()
 	return &m
+}
+
+func genMapResList(nMap, nReduce int) [][]string {
+	res := make([][]string, 0)
+	for i := 0; i < nMap; i++ {
+		l := make([]string, 0)
+		for j := 0; j < nReduce; j++ {
+			l = append(l, "interm"+strconv.Itoa(i)+strconv.Itoa(j))
+		}
+		res = append(res, l)
+	}
+	return res
 }
 
 func splitFiles(inputFiles []string, splitNum int) ([]string, error) {
@@ -179,4 +246,15 @@ func splitFiles(inputFiles []string, splitNum int) ([]string, error) {
 	}
 	resFileList = append(resFileList, mapFileName)
 	return resFileList, nil
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
 }
