@@ -24,6 +24,16 @@ type ExampleReply struct {
 
 // Add your RPC definitions here.
 
+type WorkerArgs struct {
+
+}
+
+type JobAllocation struct {
+	inputFiles []string
+	isMapJob bool
+	outputFile []string
+	hang bool
+}
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the master.

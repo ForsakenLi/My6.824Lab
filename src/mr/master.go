@@ -1,8 +1,8 @@
 package mr
 
 import (
+	"errors"
 	"fmt"
-	"io/fs"
 	"io/ioutil"
 	"log"
 	"net"
@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"sync"
-	"testing/quick"
 	"time"
 )
 
@@ -20,8 +19,9 @@ type Master struct {
 	mapFiles    []string
 	mapResFiles [][]string
 	//reduceFiles [][]string
-	resultFiles		[]string
+	resultFiles    []string
 	inMapJob       bool
+	allJobDone     bool
 	mapJobState    map[int]int
 	reduceJobState map[int]int
 	// JobState: if value is 100, means job is finished, if value is 0
@@ -31,7 +31,7 @@ type Master struct {
 	// In a word, Master only assigned those job whose state value is 0.
 	wg              sync.WaitGroup
 	mutex           sync.RWMutex
-	mutex2			sync.RWMutex	// for reduce job
+	mutex2          sync.RWMutex // for reduce job
 	timerCounter    int
 	reduceWorkerNum int
 }
@@ -99,6 +99,31 @@ func timer(m *Master) {
 			if finishedNumber == m.reduceWorkerNum {
 				m.inMapJob = false
 			}
+		} else {
+			finishedNumber := 0
+			for k, v := range m.reduceJobState {
+				if v > 0 && v <= 10 {
+					finished := true
+					reduceFileName := "mr-out-" + strconv.Itoa(k)
+					if exist, err := pathExists(reduceFileName); exist == false || err != nil {
+						finished = false
+					}
+					if !finished {
+						m.mutex.Lock()
+						m.reduceJobState[k] = v - 1
+						m.mutex.Unlock()
+					} else {
+						m.mutex.Lock()
+						m.reduceJobState[k] = 100
+						m.mutex.Unlock()
+					}
+				} else if v == 100 {
+					finishedNumber++
+				}
+			}
+			if finishedNumber == m.reduceWorkerNum {
+				m.allJobDone = true
+			}
 		}
 		time.Sleep(time.Second)
 	}
@@ -109,42 +134,48 @@ func timer(m *Master) {
 // if the entire job has finished.
 //
 func (m *Master) Done() bool {
-	ret := false
-
-	// Your code here.
-
-	return ret
+	return m.allJobDone
 }
 
-// worker call this method, must mutli-thread safe
+// GetJob worker call this method, must mutli-thread safe
 // 无论是MapJob 还是 ReduceJob 都通过该方法分配任务
 // Map: 进1出n Reduce: 进n出1
 // hang == true时表示当前暂时无任务分配，需要worker等待一段时间再尝试
-func (m *Master) GetJob() (inputFiles []string, isMapJob bool, outputFile []string, hang bool) {
+func (m *Master) GetJob(args *WorkerArgs, allocation *JobAllocation) error {
+	if allocation == nil {
+		return errors.New("nil pointer error")
+	}
 	if m.inMapJob {
 		for k, v := range m.mapJobState {
 			if v == 0 {
-				inputFiles = []string{m.mapFiles[k]}
-				isMapJob = true
-				outputFile = m.mapResFiles[k]
-				hang = false
+				allocation.inputFiles = []string{m.mapFiles[k]}
+				allocation.isMapJob = true
+				allocation.outputFile = m.mapResFiles[k]
+				allocation.hang = false
 				m.mutex.Lock()
 				m.mapJobState[k] = 10 //开始计时
 				m.mutex.Unlock()
-				return
+				return nil
 			}
 		}
-		hang = true
-		return
+		allocation.hang = true
+		return nil
 	} else {
 		// 显然 reduce也需要一个State计时器来跟踪任务状态
 		for k, v := range m.reduceJobState {
 			if v == 0 {
-				inputFiles = m.mapResFiles[k]
-				isMapJob = false
-				// outputFile = 
+				allocation.inputFiles = m.mapResFiles[k]
+				allocation.isMapJob = false
+				allocation.outputFile = []string{"mr-out-" + strconv.Itoa(k)}
+				allocation.hang = false
+				m.mutex2.Lock()
+				m.reduceJobState[k] = 10 //开始计时
+				m.mutex2.Unlock()
+				return nil
 			}
 		}
+		allocation.hang = true
+		return nil
 	}
 }
 
@@ -171,6 +202,7 @@ func MakeMaster(files []string, nReduce int) *Master {
 	for i := 0; i < 10; i++ {
 		m.mapJobState[i] = 0
 	}
+	m.reduceJobState = make(map[int]int)
 	m.inMapJob = true
 	m.wg = sync.WaitGroup{}
 	m.mutex = sync.RWMutex{}
