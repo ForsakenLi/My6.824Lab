@@ -16,14 +16,14 @@ import (
 
 type Master struct {
 	// Your definitions here.
-	mapFiles    []string
-	mapResFiles [][]string
-	//reduceFiles [][]string
-	resultFiles    []string
-	inMapJob       bool
-	allJobDone     bool
-	mapJobState    map[int]int
-	reduceJobState map[int]int
+	mapFiles          []string
+	mapResFiles       [][]string
+	reduceTargetFiles [][]string
+	resultFiles       []string
+	inMapJob          bool
+	allJobDone        bool
+	mapJobState       map[int]int
+	reduceJobState    map[int]int
 	// JobState: if value is 100, means job is finished, if value is 0
 	// job is not been assigned or failed(need to be assigned again),
 	// if value is 0~10, which is a timer, reduce
@@ -96,7 +96,7 @@ func timer(m *Master) {
 					finishedNumber++
 				}
 			}
-			if finishedNumber == m.reduceWorkerNum {
+			if finishedNumber == len(m.mapFiles) {
 				m.inMapJob = false
 			}
 		} else {
@@ -140,41 +140,49 @@ func (m *Master) Done() bool {
 // GetJob worker call this method, must mutli-thread safe
 // 无论是MapJob 还是 ReduceJob 都通过该方法分配任务
 // Map: 进1出n Reduce: 进n出1
-// hang == true时表示当前暂时无任务分配，需要worker等待一段时间再尝试
+// Hang == true时表示当前暂时无任务分配，需要worker等待一段时间再尝试
 func (m *Master) GetJob(args *WorkerArgs, allocation *JobAllocation) error {
 	if allocation == nil {
 		return errors.New("nil pointer error")
 	}
+	if m.allJobDone {
+		allocation.AllJobDone = true
+		return nil
+	}
 	if m.inMapJob {
 		for k, v := range m.mapJobState {
 			if v == 0 {
-				allocation.inputFiles = []string{m.mapFiles[k]}
-				allocation.isMapJob = true
-				allocation.outputFile = m.mapResFiles[k]
-				allocation.hang = false
+				allocation.InputFiles = []string{m.mapFiles[k]}
+				allocation.IsMapJob = true
+				allocation.OutputFile = m.mapResFiles[k]
+				allocation.Hang = false
+				allocation.JobId = k
+				allocation.NReduce = m.reduceWorkerNum
 				m.mutex.Lock()
 				m.mapJobState[k] = 10 //开始计时
 				m.mutex.Unlock()
 				return nil
 			}
 		}
-		allocation.hang = true
+		allocation.Hang = true
 		return nil
 	} else {
 		// 显然 reduce也需要一个State计时器来跟踪任务状态
 		for k, v := range m.reduceJobState {
 			if v == 0 {
-				allocation.inputFiles = m.mapResFiles[k]
-				allocation.isMapJob = false
-				allocation.outputFile = []string{"mr-out-" + strconv.Itoa(k)}
-				allocation.hang = false
+				allocation.InputFiles = m.reduceTargetFiles[k]
+				allocation.IsMapJob = false
+				allocation.OutputFile = []string{"mr-out-" + strconv.Itoa(k)}
+				allocation.Hang = false
+				allocation.JobId = k
+				allocation.NReduce = m.reduceWorkerNum
 				m.mutex2.Lock()
 				m.reduceJobState[k] = 10 //开始计时
 				m.mutex2.Unlock()
 				return nil
 			}
 		}
-		allocation.hang = true
+		allocation.Hang = true
 		return nil
 	}
 }
@@ -190,19 +198,19 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m := Master{}
 	m.reduceWorkerNum = nReduce
 	// Your code here.
-	stdFiles, err := splitFiles(files, 10)
-	if err != nil {
-		panic(err)
-	}
-	m.mapFiles = stdFiles
-	m.mapResFiles = genMapResList(10, nReduce)
+	m.mapFiles = files
+	// mabJob number is len(files)
+	m.mapResFiles, m.reduceTargetFiles = genMapResList(len(files), nReduce)
 	//m.mapIndex = 0
 	//m.reduceFiles = make([]string, 0)
 	m.mapJobState = make(map[int]int)
-	for i := 0; i < 10; i++ {
+	for i := 0; i < len(files); i++ {
 		m.mapJobState[i] = 0
 	}
 	m.reduceJobState = make(map[int]int)
+	for i := 0; i < nReduce; i++ {
+		m.reduceJobState[i] = 0
+	}
 	m.inMapJob = true
 	m.wg = sync.WaitGroup{}
 	m.mutex = sync.RWMutex{}
@@ -211,16 +219,36 @@ func MakeMaster(files []string, nReduce int) *Master {
 	return &m
 }
 
-func genMapResList(nMap, nReduce int) [][]string {
-	res := make([][]string, 0)
+func genMapResList(nMap, nReduce int) ([][]string, [][]string) {
+	mapResFiles := make([][]string, 0)
+	reduceTarFiles := make([][]string, 0)
+	//将mapResFiles中的结果排列为以reduce为第一级index
+	for j := 0; j < nReduce; j++ {
+		l := make([]string, 0)
+		for i := 0; i < nMap; i++ {
+			l = append(l, "interm-"+strconv.Itoa(i)+"-"+strconv.Itoa(j))
+		}
+		reduceTarFiles = append(reduceTarFiles, l)
+	}
 	for i := 0; i < nMap; i++ {
 		l := make([]string, 0)
 		for j := 0; j < nReduce; j++ {
-			l = append(l, "interm"+strconv.Itoa(i)+strconv.Itoa(j))
+			l = append(l, "interm-"+strconv.Itoa(i)+"-"+strconv.Itoa(j))
 		}
-		res = append(res, l)
+		mapResFiles = append(mapResFiles, l)
 	}
-	return res
+	return mapResFiles, reduceTarFiles
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
 }
 
 func splitFiles(inputFiles []string, splitNum int) ([]string, error) {
@@ -278,15 +306,4 @@ func splitFiles(inputFiles []string, splitNum int) ([]string, error) {
 	}
 	resFileList = append(resFileList, mapFileName)
 	return resFileList, nil
-}
-
-func pathExists(path string) (bool, error) {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, err
 }

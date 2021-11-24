@@ -25,14 +25,16 @@ type ExampleReply struct {
 // Add your RPC definitions here.
 
 type WorkerArgs struct {
-
 }
 
 type JobAllocation struct {
-	inputFiles []string
-	isMapJob bool
-	outputFile []string
-	hang bool
+	InputFiles []string
+	IsMapJob   bool
+	OutputFile []string
+	Hang       bool
+	JobId      int
+	NReduce	   int
+	AllJobDone bool
 }
 
 // Cook up a unique-ish UNIX-domain socket name
