@@ -42,6 +42,7 @@ gtimeout -k 2s 180s ../mrmaster ../pg*txt &
 # give the master time to create the sockets.
 sleep 1
 
+# replace timeout to gtimeout to let the code run on macOS.
 # start multiple workers.
 gtimeout -k 2s 180s ../mrworker ../../mrapps/wc.so &
 gtimeout -k 2s 180s ../mrworker ../../mrapps/wc.so &
@@ -187,6 +188,7 @@ do
   sleep 1
 done
 
+wait
 wait
 wait
 wait

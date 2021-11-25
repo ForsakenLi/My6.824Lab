@@ -4,3 +4,4 @@ api.key
 interm*
 *.so
 rm-out*
+/src/main/mr-tmp/

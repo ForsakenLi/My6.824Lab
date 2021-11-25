@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"sort"
+	"strconv"
 	"time"
 )
 import "log"
@@ -49,9 +50,9 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 		for allocation.Hang == true {
 			time.Sleep(time.Second)
 			allocation = GetJobFromMaster()
-			if allocation.AllJobDone {
-				return
-			}
+		}
+		if allocation.AllJobDone {
+			return
 		}
 		// MapWork: save the map result to a temp-mapid-ihash file, reduce job will combine the
 		// same ihash file to accelerate the reduce work
@@ -85,11 +86,6 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 			}
 			for i, pairs := range pairsForJson {
 				// 用于暂存map结果的temp文件，在循环结束后分别rename到outputFile集合
-				//err := ioutil.WriteFile(tempname[ihash(pair.Key)],
-				//	[]byte(fmt.Sprintf("%s %s\n", pair.Key, pair.Value)), fs.ModeAppend)
-				//if err != nil {
-				//	log.Fatalf("cannot write to %v", tempname[ihash(pair.Key)])
-				//}
 				temp := tempname[i]
 				var file *os.File
 				if exist, err := pathExists(temp); exist == false || err != nil {
@@ -135,7 +131,8 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 					kva = append(kva, kv...)
 				}
 			}
-			outTempName := "temp_" + allocation.OutputFile[0]
+			sort.Sort(ByKey(kva))
+			outTempName := "temp_" + allocation.OutputFile[0] + strconv.FormatInt(time.Now().UnixNano(), 16)
 			ofile, _ := os.Create(outTempName)
 
 			i := 0
@@ -169,7 +166,7 @@ func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string)
 func genTempName(jobId int, hashNum int) map[int]string {
 	res := make(map[int]string)
 	for i := 0; i < hashNum; i++ {
-		res[i] = fmt.Sprintf("temp-%d-%d", jobId, i)
+		res[i] = fmt.Sprintf("temp-%d-%d-%s", jobId, i, strconv.FormatInt(time.Now().UnixNano(), 16))
 	}
 	return res
 }
