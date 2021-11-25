@@ -15,7 +15,6 @@ import (
 )
 
 type Master struct {
-	// Your definitions here.
 	mapFiles          []string
 	mapResFiles       [][]string
 	reduceTargetFiles [][]string
@@ -29,9 +28,7 @@ type Master struct {
 	// if value is 0~10, which is a timer, reduce
 	// itself 1 per second.
 	// In a word, Master only assigned those job whose state value is 0.
-	wg              sync.WaitGroup
 	mutex           sync.RWMutex
-	mutex2          sync.RWMutex // for reduce job
 	timerCounter    int
 	reduceWorkerNum int
 }
@@ -67,7 +64,9 @@ func (m *Master) server() {
 }
 
 func timer(m *Master) {
+	m.mutex.Lock()
 	m.timerCounter++
+	m.mutex.Unlock()
 	if m.timerCounter > 1 {
 		return
 	}
@@ -87,17 +86,24 @@ func timer(m *Master) {
 						m.mutex.Lock()
 						m.mapJobState[k] = v - 1
 						m.mutex.Unlock()
+						fmt.Printf("\n[map]worker:%d, job left sec:%d\n", k, v)
 					} else {
 						m.mutex.Lock()
 						m.mapJobState[k] = 100
 						m.mutex.Unlock()
+						fmt.Printf("\n[map]worker:%d, job done\n", k)
 					}
 				} else if v == 100 {
+					m.mutex.Lock()
 					finishedNumber++
+					m.mutex.Unlock()
 				}
 			}
 			if finishedNumber == len(m.mapFiles) {
+				m.mutex.Lock()
 				m.inMapJob = false
+				m.mutex.Unlock()
+				fmt.Printf("\nall map job done, to reduce state\n")
 			}
 		} else {
 			finishedNumber := 0
@@ -112,17 +118,21 @@ func timer(m *Master) {
 						m.mutex.Lock()
 						m.reduceJobState[k] = v - 1
 						m.mutex.Unlock()
+						fmt.Printf("\n[reduce]worker:%d, job left sec:%d\n", k, v)
 					} else {
 						m.mutex.Lock()
 						m.reduceJobState[k] = 100
 						m.mutex.Unlock()
+						fmt.Printf("\n[reduce]worker:%d, job done\n", k)
 					}
 				} else if v == 100 {
 					finishedNumber++
 				}
 			}
 			if finishedNumber == m.reduceWorkerNum {
+				m.mutex.Lock()
 				m.allJobDone = true
+				m.mutex.Unlock()
 			}
 		}
 		time.Sleep(time.Second)
@@ -176,9 +186,9 @@ func (m *Master) GetJob(args *WorkerArgs, allocation *JobAllocation) error {
 				allocation.Hang = false
 				allocation.JobId = k
 				allocation.NReduce = m.reduceWorkerNum
-				m.mutex2.Lock()
+				m.mutex.Lock()
 				m.reduceJobState[k] = 10 //开始计时
-				m.mutex2.Unlock()
+				m.mutex.Unlock()
 				return nil
 			}
 		}
@@ -212,9 +222,7 @@ func MakeMaster(files []string, nReduce int) *Master {
 		m.reduceJobState[i] = 0
 	}
 	m.inMapJob = true
-	m.wg = sync.WaitGroup{}
 	m.mutex = sync.RWMutex{}
-	m.mutex2 = sync.RWMutex{}
 	m.server()
 	return &m
 }
